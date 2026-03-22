@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Dashboard</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --bg-card: #111118;
+    --bg-card-hover: #191922;
+    --bg-result: #0d0d14;
+    --border: #1e1e2e;
+    --border-active: #7c6cf0;
+    --text: #d8d8e4;
+    --text-dim: #5e5e72;
+    --text-bright: #f0f0ff;
+    --accent: #7c6cf0;
+    --accent-dim: rgba(124, 108, 240, 0.12);
+    --accent-glow: rgba(124, 108, 240, 0.25);
+    --green: #00d68f;
+    --green-dim: rgba(0, 214, 143, 0.12);
+    --orange: #ff9f43;
+    --orange-dim: rgba(255, 159, 67, 0.12);
+    --red: #ff6b6b;
+    --red-dim: rgba(255, 107, 107, 0.1);
+    --blue: #54a0ff;
+    --blue-dim: rgba(84, 160, 255, 0.1);
+    --cyan: #48dbfb;
+    --yellow: #feca57;
+    --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Menlo', monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --radius: 6px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--mono);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.5;
+    overflow: hidden;
+    height: 100vh;
+  }
+
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #2a2a3e; }
+
+  /* ── Layout ─────────────────────────────────────────────── */
+  .app {
+    display: grid;
+    grid-template-columns: 260px 1fr 320px;
+    grid-template-rows: 44px 1fr;
+    height: 100vh;
+    gap: 0;
+  }
+
+  /* ── Header ─────────────────────────────────────────────── */
+  .header {
+    grid-column: 1 / -1;
+    background: var(--bg-card);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 14px;
+    border-bottom: 1px solid var(--border);
+    z-index: 10;
+  }
+
+  .header-logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--text-bright);
+    white-space: nowrap;
+  }
+
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green);
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  .header-stats {
+    display: flex;
+    gap: 16px;
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .header-stats .stat { display:flex; align-items:center; gap:4px; }
+  .header-stats .sv { color:var(--text); font-weight:600; }
+
+  .conn-badge {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+    letter-spacing: .3px;
+  }
+  .conn-badge.on  { background:var(--green-dim); color:var(--green); border:1px solid rgba(0,214,143,.25); }
+  .conn-badge.off { background:var(--red-dim);   color:var(--red);   border:1px solid rgba(255,107,107,.2); }
+
+  /* ── Sidebar ────────────────────────────────────────────── */
+  .sidebar {
+    background: var(--bg-card);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 10px;
+  }
+
+  .sidebar h3 {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+    margin: 8px 6px 6px;
+  }
+
+  .s-item {
+    padding: 8px 10px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    margin-bottom: 2px;
+    border: 1px solid transparent;
+    transition: all .12s;
+  }
+  .s-item:hover { background:var(--bg-card-hover); border-color:var(--border); }
+  .s-item.active { background:var(--accent-dim); border-color:var(--accent); box-shadow:0 0 10px var(--accent-glow); }
+
+  .s-item .s-id { font-size:11px; font-weight:500; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .s-item .s-proj { font-size:10px; color:var(--accent); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .s-item .s-meta { font-size:10px; color:var(--text-dim); margin-top:2px; display:flex; gap:8px; }
+
+  .s-live { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--green); margin-right:3px; vertical-align:middle; animation:pulse 1.2s ease-in-out infinite; }
+
+  /* ── Todos ──────────────────────────────────────────────── */
+  .todo-section { margin-top:12px; padding-top:10px; border-top:1px solid var(--border); }
+  .todo-item { padding:4px 6px; font-size:11px; display:flex; align-items:flex-start; gap:5px; }
+  .todo-icon { flex-shrink:0; width:14px; height:14px; border-radius:3px; display:flex; align-items:center; justify-content:center; font-size:9px; margin-top:2px; }
+  .todo-icon.completed   { background:var(--green-dim);  color:var(--green); }
+  .todo-icon.in_progress { background:var(--orange-dim); color:var(--orange); animation:pulse 1s ease-in-out infinite; }
+  .todo-icon.pending     { background:var(--border);     color:var(--text-dim); }
+  .todo-text { color:var(--text-dim); }
+  .todo-text.in_progress { color:var(--orange); font-weight:500; }
+  .todo-text.completed   { color:var(--text-dim); text-decoration:line-through; opacity:.6; }
+
+  /* ── Main ───────────────────────────────────────────────── */
+  .main {
+    overflow-y: auto;
+    padding: 12px 16px;
+    scroll-behavior: smooth;
+  }
+
+  .event-stream { display:flex; flex-direction:column; gap:6px; }
+
+  /* ── Event ──────────────────────────────────────────────── */
+  .ev {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    animation: fadeSlide .15s ease-out;
+    overflow: hidden;
+  }
+  @keyframes fadeSlide { from{opacity:0;transform:translateY(3px)} to{opacity:1;transform:translateY(0)} }
+
+  .ev-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .badge {
+    font-size: 9px;
+    padding: 2px 7px;
+    border-radius: 3px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+  }
+  .badge.user      { background:var(--blue-dim); color:var(--blue); }
+  .badge.assistant  { background:var(--accent-dim); color:var(--accent); }
+  .badge.system    { background:var(--orange-dim); color:var(--orange); }
+
+  .ev-model { font-size:10px; color:var(--cyan); background:rgba(72,219,251,.08); padding:1px 6px; border-radius:3px; }
+  .ev-time  { font-size:10px; color:var(--text-dim); margin-left:auto; }
+
+  .ev-body { padding: 0 12px 10px; }
+  .ev-text { font-size:12px; color:var(--text); white-space:pre-wrap; word-break:break-word; line-height:1.65; }
+  .ev-text.user-text { color:var(--text-bright); font-size:13px; }
+
+  /* ── Tool Call ──────────────────────────────────────────── */
+  .tc-list { display:flex; flex-direction:column; gap:3px; margin-top:6px; }
+
+  .tc {
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    transition: border-color .12s;
+  }
+  .tc:hover { border-color: #2a2a40; }
+  .tc.has-result { cursor: pointer; }
+  .tc.error { border-color: rgba(255,107,107,.25); }
+
+  .tc-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: rgba(0,0,0,.25);
+    user-select: none;
+  }
+
+  .tc-name {
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .tc-name.Bash   { color: var(--green); }
+  .tc-name.Read   { color: var(--blue); }
+  .tc-name.Write  { color: var(--orange); }
+  .tc-name.Edit   { color: var(--orange); }
+  .tc-name.Glob   { color: var(--cyan); }
+  .tc-name.Grep   { color: var(--cyan); }
+  .tc-name.Task   { color: var(--yellow); }
+  .tc-name.WebFetch   { color: var(--blue); }
+  .tc-name.WebSearch  { color: var(--blue); }
+  .tc-name.TodoWrite  { color: var(--text-dim); }
+  .tc-name.default    { color: var(--text); }
+
+  .tc-detail {
+    font-size: 11px;
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+  }
+  .tc-detail code {
+    color: var(--green);
+    background: var(--green-dim);
+    padding: 0 4px;
+    border-radius: 2px;
+    font-size: 10px;
+    font-family: var(--mono);
+  }
+
+  .tc-chevron {
+    font-size: 10px;
+    color: var(--text-dim);
+    transition: transform .15s;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+  .tc.open .tc-chevron { transform: rotate(90deg); }
+
+  .tc-error-badge {
+    font-size: 9px;
+    color: var(--red);
+    background: var(--red-dim);
+    padding: 1px 5px;
+    border-radius: 2px;
+    font-weight: 600;
+  }
+
+  /* ── Tool Result Flyout ─────────────────────────────────── */
+  .tc-result {
+    display: none;
+    border-top: 1px solid var(--border);
+    background: var(--bg-result);
+    max-height: 400px;
+    overflow-y: auto;
+    position: relative;
+  }
+  .tc.open .tc-result { display: block; }
+
+  .tc-result pre {
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--text);
+    padding: 10px 12px;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .tc-result.is-error pre { color: var(--red); }
+
+  .tc-result-empty {
+    padding: 10px 12px;
+    font-size: 11px;
+    color: var(--text-dim);
+    font-style: italic;
+  }
+
+  /* ── Usage ──────────────────────────────────────────────── */
+  .usage {
+    display: flex;
+    gap: 12px;
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255,255,255,.03);
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+  .usage span { display:flex; align-items:center; gap:3px; }
+  .usage .ul { color:var(--text-dim); }
+  .usage .uv { color:var(--text); font-weight:500; }
+
+  /* ── Right Panel ────────────────────────────────────────── */
+  .right {
+    background: var(--bg-card);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .panel-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .ptab {
+    padding: 8px 14px;
+    font-size: 11px;
+    color: var(--text-dim);
+    cursor: pointer;
+    border: none;
+    border-bottom: 2px solid transparent;
+    font-family: var(--mono);
+    background: none;
+    transition: all .12s;
+  }
+  .ptab:hover { color:var(--text); }
+  .ptab.active { color:var(--accent); border-bottom-color:var(--accent); }
+
+  .panel-body { flex:1; overflow-y:auto; padding:10px; font-size:11px; }
+
+  .debug-log {
+    font-size: 10px;
+    line-height: 1.7;
+    color: var(--text-dim);
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .debug-line { padding:1px 0; }
+  .dts { color:var(--text-dim); }
+  .dlv { font-weight:600; }
+  .dlv.DEBUG { color:var(--blue); }
+  .dlv.ERROR { color:var(--red); }
+  .dlv.WARN  { color:var(--orange); }
+
+  .stats-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .sc {
+    background: rgba(0,0,0,.3);
+    border-radius: var(--radius);
+    padding: 10px;
+    border: 1px solid var(--border);
+  }
+  .sc-label { font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.8px; margin-bottom:2px; }
+  .sc-num   { font-size:18px; font-weight:700; color:var(--text-bright); }
+  .sc-num.accent { color:var(--accent); }
+  .sc-num.green  { color:var(--green); }
+  .sc-num.orange { color:var(--orange); }
+  .sc-num.blue   { color:var(--blue); }
+
+  /* ── Auto-scroll ────────────────────────────────────────── */
+  .autoscroll {
+    position: fixed;
+    bottom: 16px;
+    left: calc(260px + (100vw - 260px - 320px) / 2);
+    transform: translateX(-50%);
+    z-index: 100;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 4px 14px;
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--text-dim);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all .12s;
+  }
+  .autoscroll:hover { border-color:var(--accent); color:var(--text); }
+  .autoscroll.on { border-color:var(--green); color:var(--green); }
+  .autoscroll .ind { width:5px; height:5px; border-radius:50%; background:var(--text-dim); }
+  .autoscroll.on .ind { background:var(--green); box-shadow:0 0 5px var(--green); }
+
+  /* ── Empty ──────────────────────────────────────────────── */
+  .empty { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; color:var(--text-dim); gap:10px; }
+  .empty-icon { font-size:40px; opacity:.25; }
+
+  /* ── Responsive ─────────────────────────────────────────── */
+  @media (max-width:1100px) {
+    .app { grid-template-columns:220px 1fr; }
+    .right { display:none; }
+    .autoscroll { left:calc(220px + (100vw - 220px)/2); }
+  }
+  @media (max-width:700px) {
+    .app { grid-template-columns:1fr; grid-template-rows:44px auto 1fr; }
+    .sidebar { max-height:180px; border-right:none; border-bottom:1px solid var(--border); }
+    .autoscroll { left:50%; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="header">
+    <div class="header-logo"><div class="dot"></div><span>Claude Dashboard</span></div>
+    <div class="header-stats">
+      <div class="stat"><span>Events</span> <span class="sv" id="h-ev">0</span></div>
+      <div class="stat"><span>In</span> <span class="sv" id="h-in">0</span></div>
+      <div class="stat"><span>Out</span> <span class="sv" id="h-out">0</span></div>
+      <div class="stat"><span>Tools</span> <span class="sv" id="h-tc">0</span></div>
+    </div>
+    <span class="conn-badge off" id="conn">disconnected</span>
+  </div>
+
+  <div class="sidebar">
+    <h3>Sessions</h3>
+    <div id="s-list"></div>
+    <div class="todo-section">
+      <h3>Todos</h3>
+      <div id="t-list"></div>
+    </div>
+  </div>
+
+  <div class="main" id="main">
+    <div class="event-stream" id="stream">
+      <div class="empty"><div class="empty-icon">&#x25C8;</div><div>Waiting for session data...</div></div>
+    </div>
+  </div>
+
+  <div class="right">
+    <div class="panel-tabs">
+      <button class="ptab active" data-t="debug">Debug</button>
+      <button class="ptab" data-t="stats">Stats</button>
+    </div>
+    <div class="panel-body" id="p-debug">
+      <div class="debug-log" id="dlog">Waiting for debug output...</div>
+    </div>
+    <div class="panel-body" id="p-stats" style="display:none">
+      <div class="stats-grid" id="sgrid"></div>
+    </div>
+  </div>
+
+</div>
+
+<button class="autoscroll on" id="asbtn"><span class="ind"></span>Auto-scroll</button>
+
+<script>
+(function(){
+  // ── State ──────────────────────────────────────────────────────────
+  let ws, activeSid, events=[], autoScroll=true, sessions=[];
+  let tokIn=0, tokOut=0, toolCount=0, reconnTimer;
+
+  const $ = id => document.getElementById(id);
+  const $stream=$('stream'), $main=$('main'), $sList=$('s-list'), $tList=$('t-list');
+  const $dlog=$('dlog'), $conn=$('conn'), $asbtn=$('asbtn');
+
+  // ── Tabs ───────────────────────────────────────────────────────────
+  document.querySelectorAll('.ptab').forEach(t=>{
+    t.addEventListener('click',()=>{
+      document.querySelectorAll('.ptab').forEach(x=>x.classList.remove('active'));
+      t.classList.add('active');
+      $('p-debug').style.display = t.dataset.t==='debug'?'':'none';
+      $('p-stats').style.display = t.dataset.t==='stats'?'':'none';
+    });
+  });
+
+  // ── Auto-scroll ────────────────────────────────────────────────────
+  $asbtn.onclick = ()=>{ autoScroll=!autoScroll; $asbtn.classList.toggle('on',autoScroll); };
+  $main.addEventListener('scroll',()=>{
+    if($main.scrollHeight-$main.scrollTop-$main.clientHeight>60 && autoScroll){
+      autoScroll=false; $asbtn.classList.remove('on');
+    }
+  });
+  function scroll(){ if(autoScroll) requestAnimationFrame(()=>$main.scrollTop=$main.scrollHeight); }
+
+  // ── Format ─────────────────────────────────────────────────────────
+  function fmtTime(ts){ if(!ts)return''; const d=new Date(ts); return d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+  function fmtTok(n){ return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':''+n; }
+  function esc(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+  function fmtModel(m){ return m?m.replace('claude-','').replace(/-\d{8}$/,''):''; }
+
+  // ── Tool detail string ─────────────────────────────────────────────
+  function toolDetail(tool, inp){
+    inp=inp||{};
+    switch(tool){
+      case 'Bash':
+        return inp.description ? `<code>${esc(inp.description)}</code>` : `<code>${esc((inp.command||'').slice(0,150))}</code>`;
+      case 'Read':
+        return `<code>${esc(inp.file||'')}</code>` + (inp.offset?` @${inp.offset}`:'');
+      case 'Write':
+        return `<code>${esc(inp.file||'')}</code> (${(inp.size||0).toLocaleString()} bytes)`;
+      case 'Edit':
+        return `<code>${esc(inp.file||'')}</code>`;
+      case 'Glob':
+        return `<code>${esc(inp.pattern||'')}</code>` + (inp.path?` in ${esc(inp.path)}`:'');
+      case 'Grep':
+        return `/${esc(inp.pattern||'')}/` + (inp.path?` in ${esc(inp.path)}`:'') + (inp.output_mode?` [${inp.output_mode}]`:'');
+      case 'Task':
+        return `<span style="color:var(--yellow)">[${esc(inp.type||'?')}]</span> ${esc(inp.description||'')}`;
+      case 'WebFetch':
+        return `<code>${esc(inp.url||'')}</code>`;
+      case 'WebSearch':
+        return `"${esc(inp.query||'')}"`;
+      case 'TodoWrite':
+        return `${inp.count||0} items`;
+      case 'AskUserQuestion':
+        return (inp.questions||[]).map(q=>esc(q)).join('; ');
+      default:
+        return esc(JSON.stringify(inp).slice(0,200));
+    }
+  }
+
+  // ── Render tool call with flyout ───────────────────────────────────
+  function renderTC(tc){
+    const hasResult = tc.result !== undefined && tc.result !== null;
+    const isErr = tc.isError;
+    const cls = ['tc'];
+    if(hasResult) cls.push('has-result');
+    if(isErr) cls.push('error');
+
+    const div = document.createElement('div');
+    div.className = cls.join(' ');
+
+    const nameClass = ['Bash','Read','Write','Edit','Glob','Grep','Task','WebFetch','WebSearch','TodoWrite'].includes(tc.tool) ? tc.tool : 'default';
+
+    div.innerHTML = `
+      <div class="tc-head">
+        <span class="tc-name ${nameClass}">${esc(tc.tool)}</span>
+        <span class="tc-detail">${toolDetail(tc.tool, tc.input)}</span>
+        ${isErr ? '<span class="tc-error-badge">ERROR</span>' : ''}
+        ${hasResult ? '<span class="tc-chevron">&#9656;</span>' : ''}
+      </div>
+      ${hasResult ? `
+        <div class="tc-result${isErr?' is-error':''}">
+          ${tc.result.trim() ? `<pre>${esc(tc.result)}</pre>` : '<div class="tc-result-empty">(empty output)</div>'}
+        </div>
+      ` : ''}
+    `;
+
+    if(hasResult){
+      div.querySelector('.tc-head').addEventListener('click', ()=>{
+        div.classList.toggle('open');
+      });
+    }
+
+    return div;
+  }
+
+  // ── Render event ───────────────────────────────────────────────────
+  function renderEvent(ev){
+    if(ev.type==='queue-operation') return null;
+
+    const div = document.createElement('div');
+    div.className = 'ev';
+
+    if(ev.role==='user'){
+      div.innerHTML = `
+        <div class="ev-head">
+          <span class="badge user">USER</span>
+          ${ev.cwd?`<span style="font-size:10px;color:var(--text-dim)">${esc(ev.cwd)}</span>`:''}
+          <span class="ev-time">${fmtTime(ev.timestamp)}</span>
+        </div>
+        ${ev.text?`<div class="ev-body"><div class="ev-text user-text">${esc(ev.text)}</div></div>`:''}
+      `;
+      return div;
+    }
+
+    if(ev.role==='assistant'){
+      const usage = ev.usage||{};
+      const hasUsage = usage.inputTokens||usage.outputTokens;
+      const tcs = ev.toolCalls||[];
+
+      let bodyHtml = '';
+      if(ev.text) bodyHtml += `<div class="ev-text">${esc(ev.text)}</div>`;
+
+      const bodyDiv = document.createElement('div');
+      bodyDiv.className = 'ev-body';
+      if(ev.text) bodyDiv.innerHTML = `<div class="ev-text">${esc(ev.text)}</div>`;
+
+      if(tcs.length){
+        const tcList = document.createElement('div');
+        tcList.className = 'tc-list';
+        for(const tc of tcs) tcList.appendChild(renderTC(tc));
+        bodyDiv.appendChild(tcList);
+      }
+
+      if(hasUsage){
+        const u = document.createElement('div');
+        u.className = 'usage';
+        u.innerHTML = `
+          <span><span class="ul">in:</span> <span class="uv">${fmtTok(usage.inputTokens)}</span></span>
+          <span><span class="ul">out:</span> <span class="uv">${fmtTok(usage.outputTokens)}</span></span>
+          ${usage.cacheRead?`<span><span class="ul">cache:</span> <span class="uv">${fmtTok(usage.cacheRead)}</span></span>`:''}
+        `;
+        bodyDiv.appendChild(u);
+      }
+
+      div.innerHTML = `
+        <div class="ev-head">
+          <span class="badge assistant">ASSISTANT</span>
+          ${ev.model?`<span class="ev-model">${fmtModel(ev.model)}</span>`:''}
+          <span class="ev-time">${fmtTime(ev.timestamp)}</span>
+        </div>
+      `;
+      div.appendChild(bodyDiv);
+      return div;
+    }
+
+    // Other event types
+    div.innerHTML = `<div class="ev-head"><span class="badge system">${esc(ev.type||'event')}</span><span class="ev-time">${fmtTime(ev.timestamp)}</span></div>`;
+    return div;
+  }
+
+  // ── Sessions list ──────────────────────────────────────────────────
+  function renderSessions(){
+    $sList.innerHTML='';
+    for(const s of sessions){
+      const d=document.createElement('div');
+      d.className='s-item'+(s.sessionId===activeSid?' active':'');
+      const recent = (Date.now()-new Date(s.lastModified).getTime())<120000;
+      d.innerHTML=`
+        <div class="s-id">${recent?'<span class="s-live"></span>':''}${s.sessionId.slice(0,8)}...</div>
+        <div class="s-proj">${esc(s.project||'')}</div>
+        <div class="s-meta"><span>${(s.size/1024).toFixed(0)} KB</span><span>${fmtTime(s.lastModified)}</span></div>
+      `;
+      d.onclick=()=>{
+        activeSid=s.sessionId;
+        if(ws&&ws.readyState===1) ws.send(JSON.stringify({type:'subscribe',sessionId:s.sessionId}));
+        renderSessions();
+      };
+      $sList.appendChild(d);
+    }
+  }
+
+  // ── Todos ──────────────────────────────────────────────────────────
+  function renderTodos(groups){
+    $tList.innerHTML='';
+    for(const g of groups){
+      for(const t of g.todos){
+        const d=document.createElement('div');
+        d.className='todo-item';
+        const s=t.status||'pending';
+        const icon=s==='completed'?'&#10003;':s==='in_progress'?'&#9654;':'&#9675;';
+        const txt=s==='in_progress'?(t.activeForm||t.content):t.content;
+        d.innerHTML=`<span class="todo-icon ${s}">${icon}</span><span class="todo-text ${s}">${esc(txt)}</span>`;
+        $tList.appendChild(d);
+      }
+    }
+  }
+
+  // ── Full stream render ─────────────────────────────────────────────
+  function renderFull(){
+    $stream.innerHTML='';
+    tokIn=0; tokOut=0; toolCount=0;
+    for(const ev of events){
+      const el=renderEvent(ev);
+      if(el){ $stream.appendChild(el); accum(ev); }
+    }
+    updateStats(); scroll();
+  }
+
+  function accum(ev){
+    if(ev.usage){ tokIn+=ev.usage.inputTokens||0; tokOut+=ev.usage.outputTokens||0; }
+    if(ev.toolCalls) toolCount+=ev.toolCalls.length;
+  }
+
+  function updateStats(){
+    $('h-ev').textContent=events.length;
+    $('h-in').textContent=fmtTok(tokIn);
+    $('h-out').textContent=fmtTok(tokOut);
+    $('h-tc').textContent=toolCount;
+
+    $('sgrid').innerHTML=`
+      <div class="sc"><div class="sc-label">Events</div><div class="sc-num accent">${events.length}</div></div>
+      <div class="sc"><div class="sc-label">Tool Calls</div><div class="sc-num orange">${toolCount}</div></div>
+      <div class="sc"><div class="sc-label">Input Tokens</div><div class="sc-num blue">${fmtTok(tokIn)}</div></div>
+      <div class="sc"><div class="sc-label">Output Tokens</div><div class="sc-num green">${fmtTok(tokOut)}</div></div>
+    `;
+  }
+
+  // ── Debug ──────────────────────────────────────────────────────────
+  function appendDebug(text){
+    const lines=text.split('\n');
+    const html=lines.map(l=>{
+      const m=l.match(/^(\S+)\s+\[(\w+)\]\s*(.*)/);
+      if(m) return `<div class="debug-line"><span class="dts">${esc(m[1])}</span> <span class="dlv ${m[2]}">[${m[2]}]</span> ${esc(m[3])}</div>`;
+      return `<div class="debug-line">${esc(l)}</div>`;
+    }).join('');
+
+    if($dlog.textContent==='Waiting for debug output...') $dlog.innerHTML='';
+    $dlog.innerHTML+=html;
+    while($dlog.children.length>600) $dlog.removeChild($dlog.firstChild);
+    $('p-debug').scrollTop=$('p-debug').scrollHeight;
+  }
+
+  // ── WebSocket ──────────────────────────────────────────────────────
+  function connect(){
+    const proto=location.protocol==='https:'?'wss:':'ws:';
+    ws=new WebSocket(`${proto}//${location.host}`);
+
+    ws.onopen=()=>{
+      $conn.textContent='connected'; $conn.className='conn-badge on';
+      if(reconnTimer){clearTimeout(reconnTimer);reconnTimer=null;}
+    };
+    ws.onclose=()=>{
+      $conn.textContent='disconnected'; $conn.className='conn-badge off';
+      reconnTimer=setTimeout(connect,2000);
+    };
+    ws.onerror=e=>console.error('[ws]',e);
+    ws.onmessage=m=>{
+      try{ handle(JSON.parse(m.data)); }catch(e){ console.error('[ws] parse',e); }
+    };
+  }
+
+  function handle(d){
+    switch(d.type){
+      case 'sessions':
+        sessions=d.data||[];
+        renderSessions();
+        break;
+
+      case 'session-history':
+        activeSid=d.sessionId;
+        events=d.events||[];
+        renderFull();
+        renderSessions();
+        if(d.debug){ $dlog.innerHTML=''; appendDebug(d.debug); }
+        break;
+
+      case 'session-events':
+        if(d.sessionId===activeSid || !activeSid){
+          if(!activeSid) activeSid=d.sessionId;
+          for(const ev of (d.events||[])){
+            events.push(ev);
+            const el=renderEvent(ev);
+            if(el){ $stream.appendChild(el); accum(ev); }
+          }
+          updateStats(); scroll();
+        }
+        const idx=sessions.findIndex(s=>s.sessionId===d.sessionId);
+        if(idx>=0) sessions[idx].lastModified=new Date().toISOString();
+        renderSessions();
+        break;
+
+      case 'session-new':
+        sessions=d.sessions||sessions;
+        renderSessions();
+        break;
+
+      case 'debug':
+        if(!activeSid||d.sessionId===activeSid) appendDebug(d.lines);
+        break;
+
+      case 'todos':
+        renderTodos(d.data||[]);
+        break;
+    }
+  }
+
+  connect();
+  document.addEventListener('visibilitychange',()=>{
+    if(!document.hidden && ws && ws.readyState!==WebSocket.OPEN) connect();
+  });
+})();
+</script>
+</body>
+</html>

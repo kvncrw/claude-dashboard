@@ -1,0 +1,17 @@
+{
+  "name": "claude-dashboard",
+  "version": "1.0.0",
+  "description": "Real-time dashboard for monitoring Claude Code CLI sessions",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "chokidar": "^3.6.0",
+    "ws": "^8.20.0"
+  }
+}

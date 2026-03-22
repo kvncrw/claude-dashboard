@@ -1,0 +1,8 @@
+node_modules
+.git
+.github
+cloudflared
+*.log
+*.md
+start.sh
+.env
