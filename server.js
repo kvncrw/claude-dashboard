@@ -10,10 +10,17 @@ const CLAUDE_DIR = process.env.CLAUDE_DIR || path.join(process.env.HOME, '.claud
 const PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
 const DEBUG_DIR = path.join(CLAUDE_DIR, 'debug');
 const TODOS_DIR = path.join(CLAUDE_DIR, 'todos');
+const CREDENTIALS_FILE = path.join(CLAUDE_DIR, '.credentials.json');
 const MAX_RESULT_SIZE = parseInt(process.env.MAX_RESULT_SIZE || '51200', 10); // 50KB per tool result
+const AUTH_CHECK_INTERVAL = parseInt(process.env.AUTH_CHECK_INTERVAL || '300000', 10); // 5 min
+
+// ── Auth health state ─────────────────────────────────────────────────────
+let authHealthy = true; // optimistic on startup, first check runs quickly
+let lastAuthCheck = 0;
 
 // ── State ──────────────────────────────────────────────────────────────────
 const fileOffsets = new Map(); // filePath -> bytesRead
+const excludedSessions = new Set(); // sessionIds confirmed as bot check-ins
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function getSessionId(filePath) {
@@ -41,6 +48,121 @@ function parseJSONL(filePath, fromByte = 0) {
     return { events, newOffset: stat.size };
   } catch (e) {
     return { events, newOffset: fromByte };
+  }
+}
+
+// ── Session exclusion filter ──────────────────────────────────────────────
+// Bot check-in sessions (e.g. discord bot sending "ok" to validate auth) are
+// noise. We detect them by structure: exactly 5 JSONL lines, user content is
+// just "ok", model is <synthetic> or response is a canned auth message, and
+// token usage is negligible. These never contain real work.
+
+function isExcludedSession(filePath) {
+  const sid = getSessionId(filePath);
+  if (excludedSessions.has(sid)) return true;
+
+  try {
+    const { events } = parseJSONL(filePath, 0);
+    if (events.length > 6) return false; // real sessions have more lines
+
+    const userMsgs = events.filter(e => e.type === 'user');
+    const assistantMsgs = events.filter(e => e.type === 'assistant');
+
+    // Check if all user messages are trivial bot probes
+    const allTrivialUser = userMsgs.every(e => {
+      const content = e.message?.content;
+      if (typeof content === 'string') return content.trim().length <= 10;
+      if (Array.isArray(content)) {
+        const text = content.filter(c => c.type === 'text').map(c => c.text).join('').trim();
+        return text.length <= 10;
+      }
+      return false;
+    });
+
+    if (!allTrivialUser) return false;
+
+    // Check for synthetic model, auth errors, or canned responses
+    const isBotSession = assistantMsgs.some(e => {
+      const msg = e.message || {};
+      const model = msg.model || '';
+      const usage = msg.usage || {};
+      const content = msg.content || [];
+      const text = content.filter(c => c.type === 'text').map(c => c.text).join('');
+      const totalTokens = (usage.input_tokens || 0) + (usage.output_tokens || 0);
+
+      return (
+        model === '<synthetic>' ||
+        e.error === 'authentication_failed' ||
+        e.isApiErrorMessage === true ||
+        text.includes('Not logged in') ||
+        text.includes('ready to help') ||
+        totalTokens <= 20
+      );
+    });
+
+    if (isBotSession) {
+      excludedSessions.add(sid);
+      return true;
+    }
+  } catch (_) {}
+
+  return false;
+}
+
+// ── Auth token validation ─────────────────────────────────────────────────
+// Validates the Claude OAuth token against Anthropic's API. The dashboard
+// sidecar uses this as a health signal — if the token is invalid/expired,
+// the pod should fail its health check so the operator knows auth is broken.
+
+async function checkAuthHealth() {
+  try {
+    const creds = JSON.parse(fs.readFileSync(CREDENTIALS_FILE, 'utf8'));
+    const token = creds?.claudeAiOauth?.accessToken;
+    if (!token) {
+      console.error('[auth] No access token found in credentials file');
+      authHealthy = false;
+      return;
+    }
+
+    // Check expiry locally first
+    const expiresAt = creds.claudeAiOauth.expiresAt;
+    if (expiresAt && Date.now() > expiresAt) {
+      console.error('[auth] Token expired at', new Date(expiresAt).toISOString());
+      authHealthy = false;
+      return;
+    }
+
+    // Validate against Anthropic API (lightweight models list endpoint)
+    const https = require('https');
+    const result = await new Promise((resolve, reject) => {
+      const req = https.request('https://api.anthropic.com/v1/models', {
+        method: 'GET',
+        headers: {
+          'x-api-key': token,
+          'anthropic-version': '2023-06-01',
+        },
+        timeout: 10000,
+      }, (res) => {
+        res.resume(); // drain body
+        resolve(res.statusCode);
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+      req.end();
+    });
+
+    const wasHealthy = authHealthy;
+    authHealthy = result === 200;
+    if (!authHealthy) {
+      console.error(`[auth] Anthropic API returned ${result} — marking unhealthy`);
+    } else if (!wasHealthy) {
+      console.log('[auth] Token validated successfully — healthy');
+    }
+    lastAuthCheck = Date.now();
+  } catch (e) {
+    console.error('[auth] Health check error:', e.message);
+    authHealthy = false;
+    lastAuthCheck = Date.now();
   }
 }
 
@@ -258,6 +380,10 @@ function discoverSessions() {
           const filePath = path.join(projectPath, f);
           try {
             const fstat = fs.statSync(filePath);
+
+            // Skip bot check-in sessions (e.g. "ok" probes)
+            if (isExcludedSession(filePath)) continue;
+
             results.push({
               sessionId,
               project: dir,
@@ -315,8 +441,22 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Health check for probes / uptime monitors
+  // Health check for K8s probes — fails if auth token is invalid
   if (url === '/healthz') {
+    const status = authHealthy ? 200 : 503;
+    res.writeHead(status, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: authHealthy ? 'ok' : 'unhealthy',
+      auth: authHealthy,
+      lastAuthCheck: lastAuthCheck ? new Date(lastAuthCheck).toISOString() : null,
+      uptime: process.uptime(),
+      excludedSessions: excludedSessions.size,
+    }));
+    return;
+  }
+
+  // Readiness probe — always ready if server is up (auth check is liveness)
+  if (url === '/readyz') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', uptime: process.uptime() }));
     return;
@@ -479,10 +619,17 @@ for (const session of discoverSessions()) {
 
 // ── Start ──────────────────────────────────────────────────────────────────
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n  Claude Dashboard v1.0.0`);
+  console.log(`\n  Claude Dashboard v1.1.0`);
   console.log(`  ─────────────────────────`);
   console.log(`  http://0.0.0.0:${PORT}`);
   console.log(`  Watching: ${PROJECTS_DIR}`);
   console.log(`  Debug:    ${DEBUG_DIR}`);
-  console.log(`  Todos:    ${TODOS_DIR}\n`);
+  console.log(`  Todos:    ${TODOS_DIR}`);
+  console.log(`  Auth check interval: ${AUTH_CHECK_INTERVAL / 1000}s\n`);
+
+  // Run initial auth check after a short delay (let the server settle)
+  setTimeout(() => {
+    checkAuthHealth();
+    setInterval(checkAuthHealth, AUTH_CHECK_INTERVAL);
+  }, 5000);
 });
