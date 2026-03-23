@@ -159,10 +159,18 @@ async function checkAuthHealth() {
       console.log('[auth] Token validated successfully — healthy');
     }
     lastAuthCheck = Date.now();
+    // Broadcast auth status change to connected clients
+    if (wasHealthy !== authHealthy) {
+      broadcast({ type: 'auth', healthy: authHealthy, lastCheck: new Date(lastAuthCheck).toISOString() });
+    }
   } catch (e) {
     console.error('[auth] Health check error:', e.message);
+    const wasHealthy = authHealthy;
     authHealthy = false;
     lastAuthCheck = Date.now();
+    if (wasHealthy !== authHealthy) {
+      broadcast({ type: 'auth', healthy: authHealthy, lastCheck: new Date(lastAuthCheck).toISOString() });
+    }
   }
 }
 
@@ -441,12 +449,14 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Health check for K8s probes — fails if auth token is invalid
-  if (url === '/healthz') {
-    const status = authHealthy ? 200 : 503;
-    res.writeHead(status, { 'Content-Type': 'application/json' });
+  // Health/liveness probe — always 200 if server is up.
+  // Auth status is informational (exposed via /api/auth and WebSocket),
+  // NOT a kill signal. The dashboard is a sidecar — restarting it can't
+  // fix an expired token in the main container.
+  if (url === '/healthz' || url === '/readyz') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
-      status: authHealthy ? 'ok' : 'unhealthy',
+      status: 'ok',
       auth: authHealthy,
       lastAuthCheck: lastAuthCheck ? new Date(lastAuthCheck).toISOString() : null,
       uptime: process.uptime(),
@@ -455,10 +465,13 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Readiness probe — always ready if server is up (auth check is liveness)
-  if (url === '/readyz') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', uptime: process.uptime() }));
+  // Auth status endpoint for monitoring/alerting
+  if (url === '/api/auth') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    res.end(JSON.stringify({
+      healthy: authHealthy,
+      lastCheck: lastAuthCheck ? new Date(lastAuthCheck).toISOString() : null,
+    }));
     return;
   }
 

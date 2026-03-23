@@ -863,6 +863,17 @@
         allTodos=d.data||[];
         renderTodos();
         break;
+
+      case 'auth':
+        const dot = document.querySelector('.dot');
+        if(d.healthy){
+          dot.style.background='var(--green)';
+          dot.style.boxShadow='0 0 6px var(--green)';
+        } else {
+          dot.style.background='var(--red)';
+          dot.style.boxShadow='0 0 6px var(--red)';
+        }
+        break;
     }
   }
 
