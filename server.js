@@ -359,7 +359,12 @@ function getTodos() {
       try {
         const data = JSON.parse(fs.readFileSync(path.join(TODOS_DIR, f), 'utf8'));
         if (Array.isArray(data) && data.length > 0) {
-          todos.push({ sessionId: f.replace('.json', ''), todos: data });
+          // Todo files are named {sessionId}-agent-{agentId}.json
+          // Extract just the session UUID (first 36 chars before "-agent-")
+          const baseName = f.replace('.json', '');
+          const agentIdx = baseName.indexOf('-agent-');
+          const sessionId = agentIdx > 0 ? baseName.slice(0, agentIdx) : baseName;
+          todos.push({ sessionId, todos: data });
         }
       } catch (_) {}
     }
